@@ -1,0 +1,8 @@
+{{- if .Values.namespace.create }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ include "bashupload.namespace" . }}
+  labels:
+    {{- include "bashupload.labels" . | nindent 4 }}
+{{- end }}

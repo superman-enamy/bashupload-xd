@@ -1,0 +1,16 @@
+{{- if .Values.tls.certificate.enabled }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: wildcard-cert
+  namespace: {{ include "bashupload.namespace" . }}
+  labels:
+    {{- include "bashupload.labels" . | nindent 4 }}
+spec:
+  secretName: {{ .Values.tls.secretName }}
+  issuerRef:
+    name: {{ .Values.tls.certificate.issuerRef.name }}
+    kind: {{ .Values.tls.certificate.issuerRef.kind }}
+  dnsNames:
+    {{- toYaml .Values.tls.certificate.dnsNames | nindent 4 }}
+{{- end }}

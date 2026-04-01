@@ -1,0 +1,120 @@
+# Default values for bashupload Helm chart
+
+# Namespace configuration
+namespace:
+  create: true
+  name: bashupload
+
+# Container images
+image:
+  bashupload:
+    repository: dulljz/bashupload-go
+    tag: dev
+    pullPolicy: IfNotPresent
+  nginx:
+    repository: nginx
+    tag: 1.27-alpine
+    pullPolicy: IfNotPresent
+
+# Cloudflare R2 credentials (required)
+r2:
+  accountId: ""
+  accessKeyId: ""
+  secretAccessKey: ""
+  bucketName: "bashupload"
+
+# Application configuration
+config:
+  port: "3000"
+  maxUploadSize: "5368709120"     # 5GB
+  maxAge: "3600"                   # 1 hour
+  maxAgeForMultidownload: "86400"  # 24 hours
+  enableShortUrl: "false"
+  allowLifetimeOverMaxAge: "false"
+  shortUrlService: "https://suosuo.de/short"
+  noCleanup: "true"                # Disable cleanup in K8s (handled externally)
+
+# Nginx configuration
+nginx:
+  clientMaxBodySize: "5G"
+  sslProtocols: "TLSv1.2 TLSv1.3"
+  # Custom location for health/validation check
+  healthCheckPath: "/servads.txt"
+  healthCheckResponse: "S6GVLTLHQPLW1RLTWUKOY3I8JI46Y5HO"
+
+# TLS/cert-manager configuration
+tls:
+  enabled: true
+  secretName: wildcard-tls-secret
+  # cert-manager Certificate settings
+  certificate:
+    enabled: true
+    issuerRef:
+      name: letsencrypt-prod
+      kind: ClusterIssuer
+    dnsNames:
+      - "bashupload.app"
+      - "*.bashupload.app"
+  # ClusterIssuer settings
+  clusterIssuer:
+    enabled: true
+    name: letsencrypt-prod
+    email: example@example.com
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef: letsencrypt-prod-account-key
+    # Cloudflare DNS-01 challenge settings
+    cloudflare:
+      apiTokenSecretName: cloudflare-api-token-secret
+      apiToken: ""
+      dnsZones:
+        - "bashupload.app"
+
+# Node affinity configuration (optional)
+# 添加节点名称以排除特定节点（如控制平面节点）
+# 留空则在所有节点上部署
+nodeAffinity:
+  excludeNodes: []
+  # excludeNodes:
+  #   - your-control-plane-node
+
+# Container resources
+resources:
+  bashupload:
+    requests:
+      cpu: "0.5"
+      memory: "128Mi"
+    limits:
+      cpu: "1"
+      memory: "256Mi"
+  nginx:
+    requests:
+      cpu: "0.1"
+      memory: "64Mi"
+    limits:
+      cpu: "0.5"
+      memory: "128Mi"
+
+# Probes configuration
+probes:
+  bashupload:
+    liveness:
+      initialDelaySeconds: 40
+      periodSeconds: 30
+      timeoutSeconds: 10
+      failureThreshold: 3
+    readiness:
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+  nginx:
+    liveness:
+      initialDelaySeconds: 10
+      periodSeconds: 20
+      timeoutSeconds: 5
+      failureThreshold: 3
+    readiness:
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3

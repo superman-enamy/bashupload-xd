@@ -1,0 +1,23 @@
+{{- if .Values.tls.clusterIssuer.enabled }}
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ .Values.tls.clusterIssuer.name }}
+  labels:
+    {{- include "bashupload.labels" . | nindent 4 }}
+spec:
+  acme:
+    server: {{ .Values.tls.clusterIssuer.server }}
+    email: {{ .Values.tls.clusterIssuer.email }}
+    privateKeySecretRef:
+      name: {{ .Values.tls.clusterIssuer.privateKeySecretRef }}
+    solvers:
+      - dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: {{ .Values.tls.clusterIssuer.cloudflare.apiTokenSecretName }}
+              key: api-token
+        selector:
+          dnsZones:
+            {{- toYaml .Values.tls.clusterIssuer.cloudflare.dnsZones | nindent 12 }}
+{{- end }}

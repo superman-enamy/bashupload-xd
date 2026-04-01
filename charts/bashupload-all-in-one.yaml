@@ -1,0 +1,280 @@
+# Bashupload Kubernetes 部署文件
+# 使用方法：
+#   1. 替换所有 <YOUR_...> 占位符为实际值
+#   2. kubectl apply -f bashupload-all-in-one.yaml
+#
+# 前置要求：安装 cert-manager
+#   kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: bashupload
+
+---
+# Cloudflare API Token Secret (用于 cert-manager DNS-01 验证)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cloudflare-api-token-secret
+  namespace: cert-manager
+type: Opaque
+stringData:
+  api-token: "<YOUR_CLOUDFLARE_API_TOKEN>"
+
+---
+# Let's Encrypt ClusterIssuer
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: <YOUR_EMAIL>
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      - dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token-secret
+              key: api-token
+        selector:
+          dnsZones:
+            - "bashupload.app"
+
+---
+# 通配符证书
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: wildcard-cert
+  namespace: bashupload
+spec:
+  secretName: wildcard-tls-secret
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - "bashupload.app"
+    - "*.bashupload.app"
+
+---
+# R2 凭证 Secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: bashupload-secret
+  namespace: bashupload
+type: Opaque
+stringData:
+  R2_ACCOUNT_ID: "<YOUR_R2_ACCOUNT_ID>"
+  R2_ACCESS_KEY_ID: "<YOUR_R2_ACCESS_KEY_ID>"
+  R2_SECRET_ACCESS_KEY: "<YOUR_R2_SECRET_ACCESS_KEY>"
+  R2_BUCKET_NAME: "bashupload"
+
+---
+# 应用配置 ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bashupload-config
+  namespace: bashupload
+data:
+  PORT: "3000"
+  MAX_UPLOAD_SIZE: "5368709120"
+  MAX_AGE: "3600"
+  MAX_AGE_FOR_MULTIDOWNLOAD: "86400"
+  ENABLE_SHORT_URL: "false"
+  ALLOW_LIFETIME_OVER_MAX_AGE: "false"
+  SHORT_URL_SERVICE: "https://suosuo.de/short"
+  NO_CLEANUP: "true"
+
+---
+# Nginx 配置 ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bashupload-nginx-conf
+  namespace: bashupload
+data:
+  nginx.conf: |
+    worker_processes auto;
+
+    events {
+        worker_connections 1024;
+    }
+
+    http {
+        sendfile on;
+        client_max_body_size 5G;
+
+        server {
+            listen 80;
+            listen [::]:80;
+            listen 443 ssl http2;
+            listen [::]:443 ssl http2;
+
+            server_name _;
+
+            ssl_certificate /etc/nginx/certs/tls.crt;
+            ssl_certificate_key /etc/nginx/certs/tls.key;
+            ssl_protocols TLSv1.2 TLSv1.3;
+            ssl_ciphers HIGH:!aNULL:!MD5;
+            ssl_prefer_server_ciphers on;
+            ssl_session_cache shared:SSL:10m;
+            ssl_session_timeout 10m;
+
+            location = /servads.txt {
+                default_type text/plain;
+                return 200 'S6GVLTLHQPLW1RLTWUKOY3I8JI46Y5HO';
+            }
+
+            location / {
+                proxy_pass http://127.0.0.1:3000;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_request_buffering off;
+            }
+        }
+    }
+
+---
+# DaemonSet 部署
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: bashupload
+  namespace: bashupload
+spec:
+  selector:
+    matchLabels:
+      app: bashupload
+  template:
+    metadata:
+      labels:
+        app: bashupload
+    spec:
+      # 可选：排除特定节点（如控制平面节点）
+      # 取消注释并修改节点名称以启用
+      # affinity:
+      #   nodeAffinity:
+      #     requiredDuringSchedulingIgnoredDuringExecution:
+      #       nodeSelectorTerms:
+      #         - matchExpressions:
+      #             - key: kubernetes.io/hostname
+      #               operator: NotIn
+      #               values:
+      #                 - your-control-plane-node
+      containers:
+        # Nginx 容器 - TLS 终止
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports:
+            - name: http
+              containerPort: 80
+              hostPort: 80
+            - name: https
+              containerPort: 443
+              hostPort: 443
+          volumeMounts:
+            - name: nginx-conf
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+            - name: tls-cert
+              mountPath: /etc/nginx/certs
+              readOnly: true
+          resources:
+            requests:
+              cpu: "0.1"
+              memory: "64Mi"
+            limits:
+              cpu: "0.5"
+              memory: "128Mi"
+          livenessProbe:
+            httpGet:
+              path: /servads.txt
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /servads.txt
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+        # Bashupload 容器 - 主应用
+        - name: bashupload
+          image: dulljz/bashupload-go:dev
+          ports:
+            - containerPort: 3000
+              name: app
+          env:
+            - name: PORT
+              value: "3000"
+          envFrom:
+            - secretRef:
+                name: bashupload-secret
+            - configMapRef:
+                name: bashupload-config
+          resources:
+            requests:
+              cpu: "0.5"
+              memory: "128Mi"
+            limits:
+              cpu: "1"
+              memory: "256Mi"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: app
+            initialDelaySeconds: 40
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: app
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+      volumes:
+        - name: nginx-conf
+          configMap:
+            name: bashupload-nginx-conf
+        - name: tls-cert
+          secret:
+            secretName: wildcard-tls-secret
+
+      restartPolicy: Always
+
+---
+# Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: bashupload
+  namespace: bashupload
+spec:
+  type: ClusterIP
+  selector:
+    app: bashupload
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+    - name: https
+      port: 443
+      targetPort: https

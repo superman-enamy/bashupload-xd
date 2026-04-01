@@ -1,0 +1,47 @@
+Bashupload has been deployed successfully!
+
+## Quick Start
+
+1. Check pod status:
+   kubectl get pods -n {{ include "bashupload.namespace" . }}
+
+2. Check DaemonSet status:
+   kubectl get daemonset -n {{ include "bashupload.namespace" . }}
+
+3. View logs:
+   kubectl logs -n {{ include "bashupload.namespace" . }} -l app=bashupload -c bashupload
+
+## Architecture
+
+This deployment uses:
+- DaemonSet to run bashupload on every worker node
+- Nginx sidecar for TLS termination (hostPort 80/443)
+- cert-manager for automatic Let's Encrypt certificate management
+
+## DNS Configuration
+
+Configure your DNS with multiple A records pointing to each worker node's public IP:
+  bashupload.app -> Worker Node 1 IP
+  bashupload.app -> Worker Node 2 IP
+  bashupload.app -> Worker Node 3 IP
+  ...
+
+This provides round-robin load balancing across all nodes.
+
+{{- if .Values.tls.certificate.enabled }}
+
+## TLS Certificate
+
+A wildcard certificate will be automatically provisioned for:
+{{- range .Values.tls.certificate.dnsNames }}
+  - {{ . }}
+{{- end }}
+
+Check certificate status:
+  kubectl get certificate -n {{ include "bashupload.namespace" . }}
+{{- end }}
+
+## Prerequisites
+
+Make sure cert-manager is installed before deploying:
+  kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml

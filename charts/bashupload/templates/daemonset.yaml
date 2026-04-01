@@ -1,0 +1,112 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "bashupload.fullname" . }}
+  namespace: {{ include "bashupload.namespace" . }}
+  labels:
+    {{- include "bashupload.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "bashupload.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "bashupload.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- if .Values.nodeAffinity.excludeNodes }}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values:
+                      {{- toYaml .Values.nodeAffinity.excludeNodes | nindent 22 }}
+      {{- end }}
+      containers:
+        # Nginx container - TLS termination and reverse proxy
+        - name: nginx
+          image: "{{ .Values.image.nginx.repository }}:{{ .Values.image.nginx.tag }}"
+          imagePullPolicy: {{ .Values.image.nginx.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 80
+              hostPort: 80
+            - name: https
+              containerPort: 443
+              hostPort: 443
+          volumeMounts:
+            - name: nginx-conf
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+            - name: tls-cert
+              mountPath: /etc/nginx/certs
+              readOnly: true
+          {{- with .Values.resources.nginx }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.nginx.healthCheckPath }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.nginx.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.nginx.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.nginx.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.nginx.liveness.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.nginx.healthCheckPath }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.nginx.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.nginx.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.nginx.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.nginx.readiness.failureThreshold }}
+
+        # Bashupload container - main application
+        - name: bashupload
+          image: "{{ .Values.image.bashupload.repository }}:{{ .Values.image.bashupload.tag }}"
+          imagePullPolicy: {{ .Values.image.bashupload.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.config.port | int }}
+              name: app
+          env:
+            - name: PORT
+              value: {{ .Values.config.port | quote }}
+          envFrom:
+            - secretRef:
+                name: {{ include "bashupload.fullname" . }}-secret
+            - configMapRef:
+                name: {{ include "bashupload.fullname" . }}-config
+          {{- with .Values.resources.bashupload }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /
+              port: app
+            initialDelaySeconds: {{ .Values.probes.bashupload.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.bashupload.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.bashupload.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.bashupload.liveness.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: /
+              port: app
+            initialDelaySeconds: {{ .Values.probes.bashupload.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.bashupload.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.bashupload.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.bashupload.readiness.failureThreshold }}
+
+      volumes:
+        - name: nginx-conf
+          configMap:
+            name: {{ include "bashupload.fullname" . }}-nginx-conf
+        - name: tls-cert
+          secret:
+            secretName: {{ .Values.tls.secretName }}
+
+      restartPolicy: Always

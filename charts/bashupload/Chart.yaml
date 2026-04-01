@@ -1,0 +1,25 @@
+apiVersion: v2
+name: bashupload
+description: A Helm chart for deploying bashupload on Kubernetes with DaemonSet, Nginx sidecar, and cert-manager TLS
+
+type: application
+
+version: 0.1.0
+appVersion: "1.0.0"
+
+keywords:
+  - bashupload
+  - file-upload
+  - r2
+  - cloudflare
+  - kubernetes
+
+icon: https://raw.githubusercontent.com/DullJZ/bashupload-r2/main/public/favicon.ico
+home: https://github.com/DullJZ/bashupload-r2
+
+sources:
+  - https://github.com/DullJZ/bashupload-r2
+
+maintainers:
+  - name: DullJZ
+    url: https://github.com/DullJZ
