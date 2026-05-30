@@ -6,9 +6,7 @@ compatibility_date = "2025-08-16"
 workers_dev = true
 
 # 绑定域名
-routes = [
-	{ pattern = "bashupload.app", custom_domain = true }
-]
+# routes = [ { pattern = "bashupload.app", custom_domain = true } ]
 
 # R2 存储桶绑定
 [[r2_buckets]]
