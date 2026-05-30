@@ -1,4 +1,4 @@
-name = "bashupload-xd"
+name = "web"
 main = "src/index.js"
 compatibility_date = "2025-08-16"
 
