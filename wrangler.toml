@@ -15,13 +15,10 @@ routes = [
 binding = "R2_BUCKET"
 bucket_name = "bashupload"
 
-# 下载次数统计（可选）：KV 命名空间
-# 启用步骤 / To enable download counting:
-#   1) 运行 / run:  wrangler kv namespace create DOWNLOAD_COUNTS
-#   2) 把输出的 id 填到下面的 id，并取消注释这三行 / paste the returned id below and uncomment
-# [[kv_namespaces]]
-# binding = "DOWNLOAD_COUNTS"
-# id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+# 下载次数统计：KV 命名空间 / Download counter KV namespace
+[[kv_namespaces]]
+binding = "DOWNLOAD_COUNTS"
+id = "b7acbde26b8847a7b9c8bc164ac978ee"
 
 # 环境变量
 [vars]
@@ -31,8 +28,8 @@ SHORT_URL_SERVICE = "https://suosuo.de/short"
 PASSWORD = "8458940626"
 MAX_AGE_FOR_MULTIDOWNLOAD = "86400"
 NO_CLEANUP = "false"
-# 设为 "true" 可彻底关闭网页端：浏览器只能下载，无法上传（命令行 CLI 上传不受影响）
-DISABLE_WEB = "false"
+# 默认彻底关闭网页端：浏览器只能下载，无法上传（命令行 CLI 上传不受影响）。设为 "false" 可重新开启网页上传。
+DISABLE_WEB = "true"
 # 设为 "true" 可关闭“永不过期”上传功能
 DISABLE_NO_EXPIRE = "false"
 

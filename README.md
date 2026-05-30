@@ -96,7 +96,7 @@ Click the "Deploy to Cloudflare" button above to modify the configuration.
 
 `PASSWORD` environment variable enables the access controls. When set, it is required for **browser uploads**, for **deleting files**, and for creating **never-expire** files. Command-line uploads and all downloads remain public. If left blank, uploading is fully public and the delete endpoint is disabled. See [Access Model](#access-model).
 
-`DISABLE_WEB` (default `"false"`): set to `"true"` to turn the browser interface off completely. The site becomes **download-only** — browser uploads are blocked and the upload UI is not served, while command-line uploads and downloads keep working.
+`DISABLE_WEB` (this project ships with `"true"`): when `"true"`, the browser interface is off completely. The site is **download-only** — browser uploads are blocked and the upload UI is not served, while command-line uploads and downloads keep working. Set it to `"false"` to re-enable browser uploads.
 
 `DISABLE_NO_EXPIRE` (default `"false"`): set to `"true"` to disable the never-expire (permanent) upload option.
 
