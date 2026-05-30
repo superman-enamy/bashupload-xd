@@ -15,10 +15,6 @@ routes = [
 binding = "R2_BUCKET"
 bucket_name = "bashupload"
 
-# 下载次数统计：KV 命名空间 / Download counter KV namespace
-[[kv_namespaces]]
-binding = "DOWNLOAD_COUNTS"
-id = "b7acbde26b8847a7b9c8bc164ac978ee"
 
 # 环境变量
 [vars]
