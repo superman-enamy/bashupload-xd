@@ -855,12 +855,34 @@ function addFileToList(fileName, url, usePassword = false) {
         }, 2000);
     };
     
+    // 删除按钮：仅对本站域名的文件可用（短链接/外链无法映射到存储键）
+    let deleteKey = null;
+    try {
+        const parsed = new URL(url, window.location.origin);
+        if (parsed.origin === window.location.origin) {
+            deleteKey = decodeURIComponent(parsed.pathname.replace(/^\/+/, ''));
+        }
+    } catch (e) {}
+
     fileItem.appendChild(warningText);
     if (passwordWarning) {
         fileItem.appendChild(passwordWarning);
     }
     fileItem.appendChild(fileUrl);
     fileItem.appendChild(copyButton);
+
+    if (deleteKey) {
+        const deleteButton = document.createElement('button');
+        deleteButton.className = 'copy-button';
+        deleteButton.style.marginLeft = '8px';
+        deleteButton.style.background = '#e74c3c';
+        deleteButton.textContent = currentLang === 'zh' ? '删除' : 'Delete';
+        deleteButton.onclick = function() {
+            deleteUploadedFile(deleteKey, fileItem);
+        };
+        fileItem.appendChild(deleteButton);
+    }
+
     fileList.appendChild(fileItem);
 }
 
@@ -1038,6 +1060,54 @@ function uploadWithProgress(file, onProgress) {
         
         xhr.send(file);
     });
+}
+
+// Delete an uploaded file via the password-protected DELETE endpoint.
+async function deleteUploadedFile(key, fileItem) {
+    const passwordInput = document.getElementById('passwordInput');
+    const password = passwordInput ? passwordInput.value.trim() : '';
+    if (!password) {
+        showStatus(currentLang === 'zh'
+            ? '请输入服务器密码以删除文件'
+            : 'Enter the server password to delete files', 'error');
+        return;
+    }
+
+    const confirmMsg = currentLang === 'zh'
+        ? `确定要删除 ${key} 吗？此操作不可撤销。`
+        : `Delete ${key}? This cannot be undone.`;
+    if (!window.confirm(confirmMsg)) {
+        return;
+    }
+
+    try {
+        const res = await fetch(`${UPLOAD_URL}/${encodeURIComponent(key)}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': password }
+        });
+
+        if (res.status === 200) {
+            showStatus(currentLang === 'zh' ? `已删除 ${key}` : `Deleted ${key}`, 'success');
+            if (fileItem && fileItem.remove) fileItem.remove();
+        } else if (res.status === 401) {
+            showStatus(currentLang === 'zh'
+                ? '密码错误，无法删除'
+                : 'Wrong password, cannot delete', 'error');
+        } else if (res.status === 403) {
+            showStatus(currentLang === 'zh'
+                ? '服务器未配置密码，删除已禁用'
+                : 'Delete is disabled (no server password configured)', 'error');
+        } else if (res.status === 404) {
+            showStatus(currentLang === 'zh'
+                ? '文件不存在（可能已删除）'
+                : 'File not found (already deleted?)', 'error');
+            if (fileItem && fileItem.remove) fileItem.remove();
+        } else {
+            showStatus(currentLang === 'zh' ? '删除失败' : 'Delete failed', 'error');
+        }
+    } catch (e) {
+        showStatus((currentLang === 'zh' ? '删除失败：' : 'Delete failed: ') + e.message, 'error');
+    }
 }
 
 function copyToClipboard(text) {

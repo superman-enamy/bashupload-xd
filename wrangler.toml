@@ -23,6 +23,10 @@ SHORT_URL_SERVICE = "https://suosuo.de/short"
 PASSWORD = "8458940626"
 MAX_AGE_FOR_MULTIDOWNLOAD = "86400"
 NO_CLEANUP = "false"
+# 设为 "true" 可彻底关闭网页端：浏览器只能下载，无法上传（命令行 CLI 上传不受影响）
+DISABLE_WEB = "false"
+# 设为 "true" 可关闭“永不过期”上传功能
+DISABLE_NO_EXPIRE = "false"
 
 # 静态文件
 [assets]

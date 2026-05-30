@@ -104,6 +104,9 @@ export default {
     const url = new URL(request.url);
     const pathname = url.pathname;
 
+    // 是否通过 DISABLE_WEB 彻底关闭网页端（只保留下载 + 命令行上传）
+    const webDisabled = isFlagTrue(env.DISABLE_WEB);
+
     // 处理 GET 请求
     if (request.method === 'GET') {
       // 获取服务端配置信息的API端点
@@ -113,7 +116,8 @@ export default {
           maxUploadSize: parseInt(env.MAX_UPLOAD_SIZE || '5368709120', 10),
           maxAge: parseInt(env.MAX_AGE || '3600', 10),
           needPassword: Boolean(env.PASSWORD),
-          allowNoExpire: !isFlagTrue(env.DISABLE_NO_EXPIRE)
+          allowNoExpire: !isFlagTrue(env.DISABLE_NO_EXPIRE),
+          webDisabled: isFlagTrue(env.DISABLE_WEB)
         };
         
         return new Response(JSON.stringify(config), {
@@ -141,6 +145,7 @@ export default {
   curl bashupload.app/short -T file.txt              # 返回短链接 / Short URL
   curl -H "X-Expiration-Seconds: 3600" bashupload.app -T file.txt   # 设置有效期 / Set expiration time
   curl -H "X-No-Expire: true" -H "Authorization: PASSWORD" bashupload.app -T file.txt   # 永不过期（需密码）/ Never expire (needs password)
+  curl -X DELETE -H "Authorization: PASSWORD" bashupload.app/file.txt   # 删除文件（需密码）/ Delete a file (needs password)
 
 特性 Features:
   • 文件只能下载一次 / Files can only be downloaded once (默认 default)
@@ -157,7 +162,10 @@ export default {
             headers: { 'Content-Type': 'text/plain; charset=utf-8' },
           });
         }
-        // 如果是浏览器，重定向到 index.html
+        // 如果是浏览器：网页端被禁用时显示“仅下载”提示，否则重定向到 index.html
+        if (webDisabled) {
+          return webDisabledResponse();
+        }
         return Response.redirect(url.origin + '/index.html', 302);
       }
 
@@ -165,6 +173,12 @@ export default {
       let fileName = pathname.substring(1); // 移除开头的斜杠
 
       if (fileName === 'index.html' || fileName === 'style.css' || fileName === 'upload.js') {
+        // 网页端被禁用时不提供任何上传界面资源
+        if (webDisabled) {
+          return fileName === 'index.html'
+            ? webDisabledResponse()
+            : new Response('Web interface is disabled\n', { status: 404 });
+        }
         try {
           const assetResponse = await env.ASSETS.fetch(`https://assets.local/${fileName}`);
           if (assetResponse.status === 200) {
@@ -255,9 +269,65 @@ export default {
       }
     }
 
+    // 处理 DELETE 请求（删除文件）——属于管理操作，无论网页还是命令行都必须提供密码。
+    if (request.method === 'DELETE') {
+      // 未配置 PASSWORD 时禁止删除，避免任何人都能删文件
+      if (!env.PASSWORD) {
+        return new Response('Delete is disabled: no PASSWORD is configured on the server.\n', {
+          status: 403,
+          headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+        });
+      }
+      if (extractPassword(request) !== env.PASSWORD) {
+        return new Response('Unauthorized: deleting a file requires the password.\n', {
+          status: 401,
+          headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+        });
+      }
+
+      // 解析要删除的文件名（与下载一致，取路径最后一段）
+      let key = '';
+      try {
+        key = decodeURIComponent(pathname.replace(/^\/+/, ''));
+      } catch (e) {
+        key = pathname.replace(/^\/+/, '');
+      }
+      key = key.split('/').pop().split('\\').pop();
+
+      if (!key) {
+        return new Response('Bad request: missing file name.\n', {
+          status: 400,
+          headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+        });
+      }
+
+      const existing = await env.R2_BUCKET.head(key);
+      if (!existing) {
+        return new Response(`File not found: ${key}\n`, {
+          status: 404,
+          headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+        });
+      }
+
+      await env.R2_BUCKET.delete(key);
+      console.log(`[Delete] key=${key}`);
+      return new Response(`Deleted: ${key}\n`, {
+        status: 200,
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      });
+    }
+
     // 处理 PUT 和 POST 请求（curl -T 使用 PUT，curl -d 使用 POST）
     if (request.method !== 'PUT' && request.method !== 'POST') {
       return new Response('Method Not Allowed\n', { status: 405 });
+    }
+
+    // 网页端被禁用（DISABLE_WEB）时，浏览器上传一律拒绝；命令行（CLI）不受影响。
+    if (webDisabled && isWebClient(request)) {
+      return new Response('Web uploads are disabled. Please use the command line (curl) to upload.\n', {
+        status: 403,
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      });
     }
 
     // 检查密码保护
@@ -492,6 +562,37 @@ function isWebClient(request) {
   const ua = (request.headers.get('user-agent') || '').toLowerCase();
   if (!ua) return false; // 没有 User-Agent 视为 CLI / 脚本
   return ua.includes('mozilla');
+}
+
+// 网页端被禁用时返回的“仅下载”提示页面（DISABLE_WEB=true）。
+function webDisabledResponse() {
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BashUpload - Download only</title>
+<style>
+  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; max-width: 640px; margin: 80px auto; padding: 0 20px; color: #333; }
+  h1 { font-size: 24px; }
+  code { background: #f4f4f4; padding: 2px 6px; border-radius: 4px; }
+  .box { background: #fff3cd; border: 1px solid #ff6b35; border-radius: 8px; padding: 16px; }
+</style>
+</head>
+<body>
+  <h1>BashUpload</h1>
+  <div class="box">
+    <p>🔒 The web upload interface is disabled. This service is <strong>download-only</strong> from the browser.</p>
+    <p>网页上传已关闭，浏览器端仅支持下载。</p>
+  </div>
+  <p>Uploads are available via the command line:</p>
+  <pre><code>curl &lt;your-host&gt; -T file.txt</code></pre>
+</body>
+</html>`;
+  return new Response(html, {
+    status: 200,
+    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+  });
 }
 
 // 判断 header / env 的值是否表示“真”（true / 1 / yes / on）。
