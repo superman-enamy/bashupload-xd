@@ -166,22 +166,29 @@ Responses: `200` deleted, `404` file not found, `401` wrong/missing password, `4
 
 In the browser, each file you upload shows a **Delete** button (it uses the password from the form; available only for files hosted on this domain, not short URLs).
 
-### Download Counter (Optional)
+### Download Counter
 
-You can track how many times a file has been downloaded. This is tracked only for files that allow multiple downloads (**timed** and **never-expire** files); one-time files are deleted after the first download, so they aren't counted.
+Track how many times a file has been downloaded. Counting applies only to files that allow multiple downloads (**timed** and **never-expire** files) — one-time files are deleted after the first download, so they aren't counted.
 
-It uses a Cloudflare KV namespace and is **off until you configure it**:
+It uses a Cloudflare KV namespace bound as `DOWNLOAD_COUNTS` in `wrangler.toml`:
 
-```bash
-# 1) Create the namespace (in your own Cloudflare account)
-wrangler kv namespace create DOWNLOAD_COUNTS
-# 2) Paste the returned id into wrangler.toml and uncomment the [[kv_namespaces]] block
+```toml
+[[kv_namespaces]]
+binding = "DOWNLOAD_COUNTS"
+id = "your-kv-namespace-id"
 ```
+
+**Deploying your own copy?** The bundled `id` points at the maintainer's namespace, so switch it to your own using either:
+
+- **Auto-provision (recommended):** delete the `id` line, keeping only `binding = "DOWNLOAD_COUNTS"`. A recent Wrangler creates the namespace on first `wrangler deploy` and writes the `id` back into your config. See Cloudflare's [automatic resource provisioning](https://developers.cloudflare.com/changelog/post/2025-10-24-automatic-resource-provisioning/).
+- **Manual:** run `wrangler kv namespace create DOWNLOAD_COUNTS` and paste the returned `id` into the block above.
+
+> Unlike R2 (bound by a name you choose, `bucket_name`), KV is bound by a generated `id`, so the namespace must already exist or be auto-provisioned. If the binding is missing, download counting is simply disabled and everything else keeps working.
 
 Once enabled:
 - Every download response includes an `X-Download-Count` header.
 - Query a count any time: `GET /api/stats/<filename>` → `{ "file": "...", "downloads": 12, "tracking": true }`
-- The browser upload list shows a live **Downloads: N** indicator with a refresh button.
+- When the web UI is enabled, the browser upload list shows a live **Downloads: N** indicator with a refresh button.
 - Counters are cleaned up automatically when a file is deleted or expires.
 
 > The counter uses read-then-write, so under heavy simultaneous downloads a count may be slightly under-reported. For exact counts use a Durable Object or Workers Analytics Engine instead.
