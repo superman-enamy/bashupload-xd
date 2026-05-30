@@ -5,10 +5,14 @@ compatibility_date = "2025-08-16"
 # 启用workers.dev
 workers_dev = true
 
-# 绑定域名
-routes = [
-	{ pattern = "bashupload.app", custom_domain = true }
-]
+# 绑定自定义域名（可选 / optional）
+# 仅当该域名是你自己 Cloudflare 账号下的一个 Zone 时才可用。
+# 上游的 "bashupload.app" 不在你的账号中，启用它会导致部署报错：
+#   Can't infer zone from route ... [code: 10082]
+# 默认通过 workers_dev (*.workers.dev) 访问。要用自己的域名，请替换下方域名并取消注释：
+# routes = [
+# 	{ pattern = "your-domain.com", custom_domain = true }
+# ]
 
 # R2 存储桶绑定
 [[r2_buckets]]
