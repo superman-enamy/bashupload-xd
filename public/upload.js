@@ -883,6 +883,30 @@ function addFileToList(fileName, url, usePassword = false) {
         fileItem.appendChild(deleteButton);
     }
 
+    // 下载次数：仅对“可多次下载”（限时 / 永久）且本站域名的文件显示
+    if (deleteKey && (useExpiration || useNoExpire)) {
+        const statsWrap = document.createElement('span');
+        statsWrap.style.marginLeft = '8px';
+        statsWrap.style.fontSize = '12px';
+        statsWrap.style.color = '#666';
+
+        const countSpan = document.createElement('span');
+        countSpan.textContent = currentLang === 'zh' ? '下载次数: …' : 'Downloads: …';
+
+        const refreshBtn = document.createElement('button');
+        refreshBtn.className = 'copy-button';
+        refreshBtn.style.marginLeft = '6px';
+        refreshBtn.textContent = currentLang === 'zh' ? '刷新' : 'Refresh';
+        refreshBtn.onclick = function() { refreshDownloadCount(deleteKey, countSpan); };
+
+        statsWrap.appendChild(countSpan);
+        statsWrap.appendChild(refreshBtn);
+        fileItem.appendChild(statsWrap);
+
+        // 上传后先拉取一次（此时通常为 0）
+        refreshDownloadCount(deleteKey, countSpan);
+    }
+
     fileList.appendChild(fileItem);
 }
 
@@ -1060,6 +1084,23 @@ function uploadWithProgress(file, onProgress) {
         
         xhr.send(file);
     });
+}
+
+// Fetch and display the download count for a file from /api/stats/<key>.
+async function refreshDownloadCount(key, countSpan) {
+    try {
+        const res = await fetch(`${UPLOAD_URL}/api/stats/${encodeURIComponent(key)}`);
+        if (!res.ok) throw new Error('stats request failed');
+        const data = await res.json();
+        if (data.tracking === false) {
+            countSpan.textContent = currentLang === 'zh' ? '下载统计未启用' : 'Tracking disabled';
+            return;
+        }
+        const n = data.downloads || 0;
+        countSpan.textContent = currentLang === 'zh' ? `下载次数: ${n}` : `Downloads: ${n}`;
+    } catch (e) {
+        countSpan.textContent = currentLang === 'zh' ? '下载次数: ?' : 'Downloads: ?';
+    }
 }
 
 // Delete an uploaded file via the password-protected DELETE endpoint.

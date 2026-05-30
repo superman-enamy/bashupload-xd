@@ -167,6 +167,26 @@ curl -X DELETE -H "Authorization: yourpassword" https://bashupload.app/file.txt
 
 在浏览器中，您上传的每个文件都会显示一个**删除**按钮（使用表单中的密码；仅对本站域名的文件可用，短链接不可用）。
 
+### 下载次数统计（可选）
+
+可以统计文件被下载了多少次。仅统计允许多次下载的文件（**限时**和**永不过期**文件）；一次性文件在首次下载后即删除，因此不统计。
+
+该功能基于 Cloudflare KV 命名空间，**在你配置之前处于关闭状态**：
+
+```bash
+# 1) 在你自己的 Cloudflare 账号中创建命名空间
+wrangler kv namespace create DOWNLOAD_COUNTS
+# 2) 把输出的 id 填入 wrangler.toml，并取消注释 [[kv_namespaces]] 代码块
+```
+
+启用后：
+- 每次下载的响应都会带上 `X-Download-Count` 响应头。
+- 随时查询计数：`GET /api/stats/<filename>` → `{ "file": "...", "downloads": 12, "tracking": true }`
+- 浏览器上传列表会显示实时的 **下载次数: N** 指示和刷新按钮。
+- 文件被删除或过期时，计数会被自动清理。
+
+> 计数采用“先读后写”，在大量并发下载时可能略有少计。如需精确计数，请改用 Durable Object 或 Workers Analytics Engine。
+
 ### 快速文本分享
 
 您可以快速分享长文本片段、代码、日志或任何文本内容，无需先创建文件。只需使用 `curl -d` 直接上传文本，它将自动保存为 `.txt` 文件。

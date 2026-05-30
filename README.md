@@ -166,6 +166,26 @@ Responses: `200` deleted, `404` file not found, `401` wrong/missing password, `4
 
 In the browser, each file you upload shows a **Delete** button (it uses the password from the form; available only for files hosted on this domain, not short URLs).
 
+### Download Counter (Optional)
+
+You can track how many times a file has been downloaded. This is tracked only for files that allow multiple downloads (**timed** and **never-expire** files); one-time files are deleted after the first download, so they aren't counted.
+
+It uses a Cloudflare KV namespace and is **off until you configure it**:
+
+```bash
+# 1) Create the namespace (in your own Cloudflare account)
+wrangler kv namespace create DOWNLOAD_COUNTS
+# 2) Paste the returned id into wrangler.toml and uncomment the [[kv_namespaces]] block
+```
+
+Once enabled:
+- Every download response includes an `X-Download-Count` header.
+- Query a count any time: `GET /api/stats/<filename>` → `{ "file": "...", "downloads": 12, "tracking": true }`
+- The browser upload list shows a live **Downloads: N** indicator with a refresh button.
+- Counters are cleaned up automatically when a file is deleted or expires.
+
+> The counter uses read-then-write, so under heavy simultaneous downloads a count may be slightly under-reported. For exact counts use a Durable Object or Workers Analytics Engine instead.
+
 ### Quick Text Sharing
 
 You can quickly share long text snippets, code, logs, or any text content without creating a file first. Simply use `curl -d` to upload text directly, and it will be saved as a `.txt` file.

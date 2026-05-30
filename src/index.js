@@ -52,6 +52,7 @@ export default {
                   const expireAt = new Date(expirationTime).getTime();
                   if (now > expireAt) {
                     await env.R2_BUCKET.delete(object.key);
+                    await deleteDownloadCount(env, object.key);
                     console.log(`[Scheduled Task] Deleted expired file: ${object.key}, expiration: ${expirationTime}`);
                     return true;
                   }
@@ -72,6 +73,7 @@ export default {
                 // 如果文件年龄超过 MAX_AGE，删除文件
                 if (ageInSeconds > maxAge) {
                   await env.R2_BUCKET.delete(object.key);
+                  await deleteDownloadCount(env, object.key);
                   console.log(`[Scheduled Task] Deleted expired file: ${object.key}, age: ${ageInSeconds}s`);
                   return true; // 返回 true 表示删除了文件
                 }
@@ -121,6 +123,32 @@ export default {
         };
         
         return new Response(JSON.stringify(config), {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET',
+            'Access-Control-Allow-Headers': 'Content-Type'
+          }
+        });
+      }
+
+      // 下载次数统计 API：GET /api/stats/<filename>
+      if (pathname.startsWith('/api/stats/')) {
+        let statKey = '';
+        try {
+          statKey = decodeURIComponent(pathname.slice('/api/stats/'.length));
+        } catch (e) {
+          statKey = pathname.slice('/api/stats/'.length);
+        }
+        statKey = statKey.split('/').pop().split('\\').pop();
+
+        const downloads = await getDownloadCount(env, statKey);
+        return new Response(JSON.stringify({
+          file: statKey,
+          downloads,
+          tracking: Boolean(env.DOWNLOAD_COUNTS)
+        }), {
           status: 200,
           headers: {
             'Content-Type': 'application/json',
@@ -220,6 +248,7 @@ export default {
             if (now > expireAt) {
               // 文件已过期，删除并返回404
               await env.R2_BUCKET.delete(fileName);
+              ctx.waitUntil(deleteDownloadCount(env, fileName));
               console.log(`[Expired Download] Deleted expired file: ${fileName}`);
               return new Response('File not found (expired)\n', { status: 404 });
             }
@@ -261,6 +290,15 @@ export default {
           headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
           headers.set('Pragma', 'no-cache');
           headers.set('Expires', '0');
+
+          // 记录下载次数：仅统计可多次下载的文件（限时 / 永久）。
+          // 一次性文件下载后即删除，计数没有意义，因此跳过。
+          if (!isOneTime) {
+            const count = await incrementDownloadCount(env, ctx, fileName);
+            if (count !== null) {
+              headers.set('X-Download-Count', String(count));
+            }
+          }
 
           return new Response(body, { headers });
         } catch (e) {
@@ -310,6 +348,7 @@ export default {
       }
 
       await env.R2_BUCKET.delete(key);
+      ctx.waitUntil(deleteDownloadCount(env, key));
       console.log(`[Delete] key=${key}`);
       return new Response(`Deleted: ${key}\n`, {
         status: 200,
@@ -618,6 +657,43 @@ function extractPassword(request) {
     }
   }
   return authHeader;
+}
+
+// ===== 下载次数统计（基于 KV，可选）=====
+// 仅在配置了 DOWNLOAD_COUNTS KV 绑定时生效；未配置时所有函数都是安全的空操作，不影响主流程。
+async function getDownloadCount(env, key) {
+  if (!env || !env.DOWNLOAD_COUNTS || !key) return 0;
+  try {
+    const value = await env.DOWNLOAD_COUNTS.get(key);
+    const n = parseInt(value || '0', 10);
+    return Number.isNaN(n) ? 0 : n;
+  } catch (e) {
+    console.error(`[Stats] Failed to read count for ${key}:`, e);
+    return 0;
+  }
+}
+
+// 增加一次下载计数，返回新的计数值（用于响应头）。写入放到 waitUntil 中，不阻塞响应。
+async function incrementDownloadCount(env, ctx, key) {
+  if (!env || !env.DOWNLOAD_COUNTS || !key) return null;
+  const next = (await getDownloadCount(env, key)) + 1;
+  const write = env.DOWNLOAD_COUNTS.put(key, String(next)).catch((e) => {
+    console.error(`[Stats] Failed to write count for ${key}:`, e);
+  });
+  if (ctx && ctx.waitUntil) {
+    ctx.waitUntil(write);
+  } else {
+    await write;
+  }
+  return next;
+}
+
+// 文件被删除时清理对应的计数键，避免遗留无用数据。
+function deleteDownloadCount(env, key) {
+  if (!env || !env.DOWNLOAD_COUNTS || !key) return Promise.resolve();
+  return env.DOWNLOAD_COUNTS.delete(key).catch((e) => {
+    console.error(`[Stats] Failed to delete count for ${key}:`, e);
+  });
 }
 
 // 清理文件名：仅把空白字符替换成 -，其余保持原样（不重命名）。

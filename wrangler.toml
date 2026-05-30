@@ -15,6 +15,14 @@ routes = [
 binding = "R2_BUCKET"
 bucket_name = "bashupload"
 
+# 下载次数统计（可选）：KV 命名空间
+# 启用步骤 / To enable download counting:
+#   1) 运行 / run:  wrangler kv namespace create DOWNLOAD_COUNTS
+#   2) 把输出的 id 填到下面的 id，并取消注释这三行 / paste the returned id below and uncomment
+# [[kv_namespaces]]
+# binding = "DOWNLOAD_COUNTS"
+# id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+
 # 环境变量
 [vars]
 MAX_UPLOAD_SIZE = "5368709120"
