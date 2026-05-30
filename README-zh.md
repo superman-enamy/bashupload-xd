@@ -24,7 +24,15 @@ curl bashupload.app/short -T file.txt
 
 # 上传并设置有效期（86400秒=24小时，允许多次下载）
 curl -H "X-Expiration-Seconds: 86400" bashupload.app -T file.txt
+
+# 上传永不过期的文件（需要密码）
+curl -H "X-No-Expire: true" -H "Authorization: yourpassword" bashupload.app -T file.txt
+
+# 删除文件（需要密码）
+curl -X DELETE -H "Authorization: yourpassword" https://bashupload.app/file.txt
 ```
+
+> **说明：** 上传后的文件会保留**原始文件名**（空格替换为 `-`），不再重命名为随机字符串。命令行上传和所有下载都是**公开**的，而通过浏览器上传需要密码。详见 [访问权限模型](#访问权限模型)。
 
 使用命令行别名快速设置
 
@@ -52,9 +60,12 @@ source ~/.bashrc
 ## 浏览器上传
 
 - 拖拽文件或点击选择文件
-- 设置文件的有效期
+- 设置文件有效期，或勾选**永不过期**（永久保存）
+- 直接在页面上**删除**已上传的文件
 - 直接下载链接
 - 无需注册
+
+> 通过浏览器上传需要服务器密码。命令行（`curl`）上传保持公开，下载对所有人公开。详见 [访问权限模型](#访问权限模型)。
 
 ## 特性
 
@@ -63,13 +74,15 @@ source ~/.bashrc
 - 浏览器拖拽上传
 - 无需注册
 - 直接下载链接
-- 隐私保护：文件在下载后自动删除
-- 安全的文件存储，仅限一次下载
-- 支持自定义有效期：可设置文件有效期，在指定时间内允许多次下载
+- **保留原始文件名**（空格替换为 `-`），不再使用随机文件名
+- 默认一次性下载，可选限时下载或**永不过期（永久保存）**模式
+- 通过密码保护的接口**按需删除文件**
+- 命令行上传公开、浏览器上传需密码、下载对所有人公开
+- 可选的**仅下载模式**，彻底关闭网页上传界面
 - 支持最大 5GB 的文件（自部署可调整）
 - 支持自部署设置密码
 
-**隐私注意：** 为了您的隐私和安全，文件在下载后会立即从我们的服务器上删除。每个文件**默认只能下载一次**，**除非您设置了有效期**。设置有效期后，文件可以在有效期内多次下载。下载后请务必将文件保存在本地，因为链接在首次下载后（一次性下载）或过期后（有效期下载）将不再有效。
+**隐私注意：** 默认情况下每个文件**只能下载一次**，下载后立即删除。您也可以设置**有效期**（到期前可多次下载），或将文件标记为**永不过期**（保留到您手动删除为止）。永久文件不会被自动清理任务删除。一次性文件请下载后及时本地保存，因为链接在首次下载后即失效。
 
 
 ## 自部署到Cloudflare
@@ -82,9 +95,26 @@ source ~/.bashrc
 
 `SHORT_URL_SERVICE` 是短链接服务的 API 端点（默认为 `https://suosuo.de/short`），如果需要，可以将其更改为您自己的短链接服务。仅支持 [MyUrls](https://github.com/CareyWang/MyUrls)。
 
-`PASSWORD` 环境变量为上传、下载必须提供的密码。如果不需要密码保护，可以将其留空。
+`PASSWORD` 环境变量用于启用访问控制。设置后，**浏览器上传**、**删除文件**和创建**永不过期**文件都需要该密码；命令行上传和所有下载仍然公开。如果留空，上传完全公开，且删除接口被禁用。详见 [访问权限模型](#访问权限模型)。
+
+`DISABLE_WEB`（本项目默认 `"true"`）：为 `"true"` 时彻底关闭浏览器界面，站点变为**仅下载**——浏览器上传被拒绝、上传界面不再提供，而命令行上传和下载仍可正常使用。设为 `"false"` 可重新开启网页上传。
+
+`DISABLE_NO_EXPIRE`（默认 `"false"`）：设为 `"true"` 可关闭“永不过期”（永久保存）上传选项。
 
 编译部署最后一步可能会出现部署失败的错误，原因是默认使用了配置文件中的 bashupload.app 作为域名。事实上项目已经部署成功，在Worker项目设置中进行域名绑定即可。
+
+## 访问权限模型
+
+| 操作 | 命令行（curl/wget） | 浏览器 |
+|---|---|---|
+| 上传 | 公开（无需密码） | 需要密码 |
+| 下载链接 | 公开 | 公开 |
+| 删除文件 | 需要密码 | 需要密码（🗑️ 按钮） |
+| 永不过期上传 | 需要密码 | 需要密码 |
+
+- 密码通过 `PASSWORD` 环境变量设置。若为空，则上传完全公开且删除被禁用。
+- 浏览器与命令行通过 `User-Agent` 请求头区分。
+- 设置 `DISABLE_WEB=true` 可让服务变为仅下载（完全禁止浏览器上传）。
 
 ## 高级功能
 
@@ -110,6 +140,53 @@ curl -H "X-Expiration-Seconds: 604800" bashupload.app -T file.txt
 - 最大允许的有效期由 `MAX_AGE_FOR_MULTIDOWNLOAD` 控制（默认：24小时）
 - 浏览器上传也通过UI支持设置有效期
 
+### 永不过期（永久文件）
+
+将文件标记为永久后，它不会被自动删除，可以无限次下载，并且会被定时清理任务跳过。由于会持续占用存储空间，此功能**需要密码**。
+
+```sh
+# 永不过期（需要密码）
+curl -H "X-No-Expire: true" -H "Authorization: yourpassword" bashupload.app -T file.txt
+
+# X-Expiration-Seconds: 0 效果相同
+curl -H "X-Expiration-Seconds: 0" -H "Authorization: yourpassword" bashupload.app -T file.txt
+```
+
+在浏览器中，勾选**“永不过期（永久保存）”**复选框即可。可通过设置 `DISABLE_NO_EXPIRE=true` 关闭该选项。
+
+### 删除文件
+
+永久文件（以及其他任意文件）都可以通过受密码保护的 `DELETE` 接口删除。删除始终需要密码——命令行和浏览器都是如此——并且在未配置 `PASSWORD` 时被禁用。
+
+```sh
+# 删除文件
+curl -X DELETE -H "Authorization: yourpassword" https://bashupload.app/file.txt
+```
+
+返回码：`200` 删除成功，`404` 文件不存在，`401` 密码错误或缺失，`403` 删除被禁用（未配置密码）。
+
+在浏览器中，您上传的每个文件都会显示一个**删除**按钮（使用表单中的密码；仅对本站域名的文件可用，短链接不可用）。
+
+### 下载次数统计（可选）
+
+可以统计文件被下载了多少次。仅统计允许多次下载的文件（**限时**和**永不过期**文件）；一次性文件在首次下载后即删除，因此不统计。
+
+该功能基于 Cloudflare KV 命名空间，**在你配置之前处于关闭状态**：
+
+```bash
+# 1) 在你自己的 Cloudflare 账号中创建命名空间
+wrangler kv namespace create DOWNLOAD_COUNTS
+# 2) 把输出的 id 填入 wrangler.toml，并取消注释 [[kv_namespaces]] 代码块
+```
+
+启用后：
+- 每次下载的响应都会带上 `X-Download-Count` 响应头。
+- 随时查询计数：`GET /api/stats/<filename>` → `{ "file": "...", "downloads": 12, "tracking": true }`
+- 浏览器上传列表会显示实时的 **下载次数: N** 指示和刷新按钮。
+- 文件被删除或过期时，计数会被自动清理。
+
+> 计数采用“先读后写”，在大量并发下载时可能略有少计。如需精确计数，请改用 Durable Object 或 Workers Analytics Engine。
+
 ### 快速文本分享
 
 您可以快速分享长文本片段、代码、日志或任何文本内容，无需先创建文件。只需使用 `curl -d` 直接上传文本，它将自动保存为 `.txt` 文件。
@@ -134,20 +211,33 @@ curl bashupload.app/short -d "你的文本内容"
 
 ### 密码保护
 
-要启用密码保护，请在 Cloudflare Worker 设置中设置 `PASSWORD` 环境变量。当设置 PASSWORD 后，上传和下载都需要在 Authorization 头中提供密码。
+在 Cloudflare Worker 设置中设置 `PASSWORD` 环境变量以启用访问控制。设置 `PASSWORD` 后：
 
-使用 curl 的示例：
+- **命令行上传保持公开**——无需密码。
+- **下载对所有人公开**（浏览器和命令行）。
+- **浏览器上传需要密码**，在上传表单中输入。
+- **删除文件**和**永不过期上传**需要密码。
+
 ```sh
-# 带密码上传
-curl -H "Authorization: yourpassword" bashupload.app -T file.txt
+# 命令行上传——无需密码
+curl bashupload.app -T file.txt
 
-# 带密码下载
-curl -H "Authorization: yourpassword" https://bashupload.app/yourfile.txt
+# 下载——无需密码
+curl https://bashupload.app/yourfile.txt -o downloaded.txt
+
+# 永久上传 / 删除——需要密码
+curl -H "X-No-Expire: true" -H "Authorization: yourpassword" bashupload.app -T file.txt
+curl -X DELETE -H "Authorization: yourpassword" https://bashupload.app/yourfile.txt
 ```
 
-设置含密码的alias别名：
-```sh
-echo "alias bashupload='curl -H \"Authorization: yourpassword\" bashupload.app -T'" >> ~/.bashrc
-echo "alias bashuploadshort='curl -H \"Authorization: yourpassword\" bashupload.app/short -T'" >> ~/.bashrc
-source ~/.bashrc
+如果 `PASSWORD` 留空，则上传完全公开，且删除接口被禁用。
+
+### 仅下载模式（关闭网页界面）
+
+设置 `DISABLE_WEB=true` 可彻底关闭浏览器界面。此时用浏览器访问站点会看到简短的“仅下载”提示，上传界面不再提供，任何浏览器上传请求都会返回 `403`。下载和命令行上传仍正常工作。
+
+```toml
+# wrangler.toml
+[vars]
+DISABLE_WEB = "true"
 ```

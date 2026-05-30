@@ -22,6 +22,7 @@ async function fetchServerConfig() {
             updateMaxExpirationDisplay();
             updateMaxFileSizeDisplay();
             applyPasswordRequirement();
+            applyNoExpireAvailability();
         }
     } catch (error) {
         console.error('Failed to fetch server configuration:', error);
@@ -95,6 +96,18 @@ function updateMaxFileSizeDisplay() {
         maxFileSizeFeature.setAttribute('data-en', featureTextEn);
         maxFileSizeFeature.setAttribute('data-zh', featureTextZh);
         maxFileSizeFeature.textContent = currentLang === 'zh' ? featureTextZh : featureTextEn;
+    }
+}
+
+// Hide the "Never expire" option if the server has disabled it (DISABLE_NO_EXPIRE).
+function applyNoExpireAvailability() {
+    const option = document.getElementById('noExpireOption');
+    const checkbox = document.getElementById('useNoExpire');
+    if (!option) return;
+    const allowed = !serverConfig || serverConfig.allowNoExpire !== false;
+    option.style.display = allowed ? '' : 'none';
+    if (!allowed && checkbox) {
+        checkbox.checked = false;
     }
 }
 
@@ -374,6 +387,11 @@ async function uploadText(text, maxRetries = 3) {
                             ? `文本上传成功！(一次性下载)`
                             : `Text uploaded successfully! (One-time download)`;
                     }
+                    if (document.getElementById('useNoExpire')?.checked) {
+                        successMsg = currentLang === 'zh'
+                            ? `文本上传成功！(永久保存)`
+                            : `Text uploaded successfully! (Never expires)`;
+                    }
                     showStatus(successMsg, 'success');
                     // 提取纯URL（去除警告信息）
                     const cleanUrl = responseUrl.split('\n')[0];
@@ -459,6 +477,7 @@ function uploadTextWithProgress(text, onProgress) {
 
         // Check if expiration is set
         const useExpiration = document.getElementById('useExpiration')?.checked;
+        const useNoExpire = document.getElementById('useNoExpire')?.checked;
 
         // Use POST method for text upload
         xhr.open('POST', uploadPath);
@@ -469,8 +488,10 @@ function uploadTextWithProgress(text, onProgress) {
             xhr.setRequestHeader('Authorization', passwordInput.value);
         }
 
-        // Add expiration header if expiration is set
-        if (useExpiration) {
+        // Permanent (never expire) takes precedence over a timed expiration
+        if (useNoExpire) {
+            xhr.setRequestHeader('X-No-Expire', 'true');
+        } else if (useExpiration) {
             const setExpirationBtn = document.getElementById('setExpirationBtn');
             let expirationSeconds = setExpirationBtn.getAttribute('data-expiration-seconds');
 
@@ -527,14 +548,27 @@ document.addEventListener('DOMContentLoaded', function() {
     // Set up expiration checkbox functionality
     const useExpirationCheckbox = document.getElementById('useExpiration');
     const expirationContainer = document.getElementById('expirationContainer');
-    
+    const useNoExpireCheckbox = document.getElementById('useNoExpire');
+
     useExpirationCheckbox.addEventListener('change', function() {
         if (this.checked) {
             expirationContainer.style.display = 'block';
+            // "Set expiration" and "Never expire" are mutually exclusive
+            if (useNoExpireCheckbox) useNoExpireCheckbox.checked = false;
         } else {
             expirationContainer.style.display = 'none';
         }
     });
+
+    if (useNoExpireCheckbox) {
+        useNoExpireCheckbox.addEventListener('change', function() {
+            if (this.checked) {
+                // Turn off the timed-expiration option
+                useExpirationCheckbox.checked = false;
+                expirationContainer.style.display = 'none';
+            }
+        });
+    }
 
     // Set up expiration button functionality
     const setExpirationBtn = document.getElementById('setExpirationBtn');
@@ -748,7 +782,12 @@ function addFileToList(fileName, url, usePassword = false) {
     warningText.style.color = '#ff6b35';
     warningText.style.fontSize = '12px';
     warningText.style.marginBottom = '5px';
-    if (useExpiration) {
+    const useNoExpire = document.getElementById('useNoExpire')?.checked;
+    if (useNoExpire) {
+        warningText.innerHTML = currentLang === 'zh'
+            ? '♾️ 注意：此文件永久保存，可无限次下载'
+            : '♾️ Note: This file never expires and can be downloaded unlimited times';
+    } else if (useExpiration) {
         const setExpirationBtn = document.getElementById('setExpirationBtn');
         const expirationSeconds = setExpirationBtn.getAttribute('data-expiration-seconds');
         
@@ -816,12 +855,58 @@ function addFileToList(fileName, url, usePassword = false) {
         }, 2000);
     };
     
+    // 删除按钮：仅对本站域名的文件可用（短链接/外链无法映射到存储键）
+    let deleteKey = null;
+    try {
+        const parsed = new URL(url, window.location.origin);
+        if (parsed.origin === window.location.origin) {
+            deleteKey = decodeURIComponent(parsed.pathname.replace(/^\/+/, ''));
+        }
+    } catch (e) {}
+
     fileItem.appendChild(warningText);
     if (passwordWarning) {
         fileItem.appendChild(passwordWarning);
     }
     fileItem.appendChild(fileUrl);
     fileItem.appendChild(copyButton);
+
+    if (deleteKey) {
+        const deleteButton = document.createElement('button');
+        deleteButton.className = 'copy-button';
+        deleteButton.style.marginLeft = '8px';
+        deleteButton.style.background = '#e74c3c';
+        deleteButton.textContent = currentLang === 'zh' ? '删除' : 'Delete';
+        deleteButton.onclick = function() {
+            deleteUploadedFile(deleteKey, fileItem);
+        };
+        fileItem.appendChild(deleteButton);
+    }
+
+    // 下载次数：仅对“可多次下载”（限时 / 永久）且本站域名的文件显示
+    if (deleteKey && (useExpiration || useNoExpire)) {
+        const statsWrap = document.createElement('span');
+        statsWrap.style.marginLeft = '8px';
+        statsWrap.style.fontSize = '12px';
+        statsWrap.style.color = '#666';
+
+        const countSpan = document.createElement('span');
+        countSpan.textContent = currentLang === 'zh' ? '下载次数: …' : 'Downloads: …';
+
+        const refreshBtn = document.createElement('button');
+        refreshBtn.className = 'copy-button';
+        refreshBtn.style.marginLeft = '6px';
+        refreshBtn.textContent = currentLang === 'zh' ? '刷新' : 'Refresh';
+        refreshBtn.onclick = function() { refreshDownloadCount(deleteKey, countSpan); };
+
+        statsWrap.appendChild(countSpan);
+        statsWrap.appendChild(refreshBtn);
+        fileItem.appendChild(statsWrap);
+
+        // 上传后先拉取一次（此时通常为 0）
+        refreshDownloadCount(deleteKey, countSpan);
+    }
+
     fileList.appendChild(fileItem);
 }
 
@@ -883,6 +968,11 @@ async function uploadSimpleFile(file, maxRetries = 3) {
                         successMsg = currentLang === 'zh' 
                             ? `成功上传 ${file.name}！(一次性下载)` 
                             : `Successfully uploaded ${file.name}! (One-time download)`;
+                    }
+                    if (document.getElementById('useNoExpire')?.checked) {
+                        successMsg = currentLang === 'zh'
+                            ? `成功上传 ${file.name}！(永久保存)`
+                            : `Successfully uploaded ${file.name}! (Never expires)`;
                     }
                     showStatus(successMsg, 'success');
                     // 提取纯URL（去除警告信息）
@@ -958,7 +1048,7 @@ function uploadWithProgress(file, onProgress) {
         
         // Check if short URL option is selected
         const useShortUrl = document.getElementById('useShortUrl')?.checked;
-        const uploadPath = useShortUrl ? `${UPLOAD_URL}/short` : `${UPLOAD_URL}/${file.name}`;
+        const uploadPath = useShortUrl ? `${UPLOAD_URL}/short` : `${UPLOAD_URL}/${encodeURIComponent(file.name)}`;
         
         // Check if password protection is enabled
         const usePassword = document.getElementById('usePassword')?.checked;
@@ -966,6 +1056,7 @@ function uploadWithProgress(file, onProgress) {
         
         // Check if expiration is set
         const useExpiration = document.getElementById('useExpiration')?.checked;
+        const useNoExpire = document.getElementById('useNoExpire')?.checked;
         
         // Make the request using PUT method to match curl -T behavior
         xhr.open('PUT', uploadPath);
@@ -975,8 +1066,10 @@ function uploadWithProgress(file, onProgress) {
             xhr.setRequestHeader('Authorization', passwordInput.value);
         }
         
-        // Add expiration header if expiration is set
-        if (useExpiration) {
+        // Permanent (never expire) takes precedence over a timed expiration
+        if (useNoExpire) {
+            xhr.setRequestHeader('X-No-Expire', 'true');
+        } else if (useExpiration) {
             const setExpirationBtn = document.getElementById('setExpirationBtn');
             let expirationSeconds = setExpirationBtn.getAttribute('data-expiration-seconds');
             
@@ -991,6 +1084,71 @@ function uploadWithProgress(file, onProgress) {
         
         xhr.send(file);
     });
+}
+
+// Fetch and display the download count for a file from /api/stats/<key>.
+async function refreshDownloadCount(key, countSpan) {
+    try {
+        const res = await fetch(`${UPLOAD_URL}/api/stats/${encodeURIComponent(key)}`);
+        if (!res.ok) throw new Error('stats request failed');
+        const data = await res.json();
+        if (data.tracking === false) {
+            countSpan.textContent = currentLang === 'zh' ? '下载统计未启用' : 'Tracking disabled';
+            return;
+        }
+        const n = data.downloads || 0;
+        countSpan.textContent = currentLang === 'zh' ? `下载次数: ${n}` : `Downloads: ${n}`;
+    } catch (e) {
+        countSpan.textContent = currentLang === 'zh' ? '下载次数: ?' : 'Downloads: ?';
+    }
+}
+
+// Delete an uploaded file via the password-protected DELETE endpoint.
+async function deleteUploadedFile(key, fileItem) {
+    const passwordInput = document.getElementById('passwordInput');
+    const password = passwordInput ? passwordInput.value.trim() : '';
+    if (!password) {
+        showStatus(currentLang === 'zh'
+            ? '请输入服务器密码以删除文件'
+            : 'Enter the server password to delete files', 'error');
+        return;
+    }
+
+    const confirmMsg = currentLang === 'zh'
+        ? `确定要删除 ${key} 吗？此操作不可撤销。`
+        : `Delete ${key}? This cannot be undone.`;
+    if (!window.confirm(confirmMsg)) {
+        return;
+    }
+
+    try {
+        const res = await fetch(`${UPLOAD_URL}/${encodeURIComponent(key)}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': password }
+        });
+
+        if (res.status === 200) {
+            showStatus(currentLang === 'zh' ? `已删除 ${key}` : `Deleted ${key}`, 'success');
+            if (fileItem && fileItem.remove) fileItem.remove();
+        } else if (res.status === 401) {
+            showStatus(currentLang === 'zh'
+                ? '密码错误，无法删除'
+                : 'Wrong password, cannot delete', 'error');
+        } else if (res.status === 403) {
+            showStatus(currentLang === 'zh'
+                ? '服务器未配置密码，删除已禁用'
+                : 'Delete is disabled (no server password configured)', 'error');
+        } else if (res.status === 404) {
+            showStatus(currentLang === 'zh'
+                ? '文件不存在（可能已删除）'
+                : 'File not found (already deleted?)', 'error');
+            if (fileItem && fileItem.remove) fileItem.remove();
+        } else {
+            showStatus(currentLang === 'zh' ? '删除失败' : 'Delete failed', 'error');
+        }
+    } catch (e) {
+        showStatus((currentLang === 'zh' ? '删除失败：' : 'Delete failed: ') + e.message, 'error');
+    }
 }
 
 function copyToClipboard(text) {

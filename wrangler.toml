@@ -15,6 +15,11 @@ routes = [
 binding = "R2_BUCKET"
 bucket_name = "bashupload"
 
+# 下载次数统计：KV 命名空间 / Download counter KV namespace
+[[kv_namespaces]]
+binding = "DOWNLOAD_COUNTS"
+id = "b7acbde26b8847a7b9c8bc164ac978ee"
+
 # 环境变量
 [vars]
 MAX_UPLOAD_SIZE = "5368709120"
@@ -23,6 +28,10 @@ SHORT_URL_SERVICE = "https://suosuo.de/short"
 PASSWORD = "8458940626"
 MAX_AGE_FOR_MULTIDOWNLOAD = "86400"
 NO_CLEANUP = "false"
+# 默认彻底关闭网页端：浏览器只能下载，无法上传（命令行 CLI 上传不受影响）。设为 "false" 可重新开启网页上传。
+DISABLE_WEB = "true"
+# 设为 "true" 可关闭“永不过期”上传功能
+DISABLE_NO_EXPIRE = "false"
 
 # 静态文件
 [assets]
