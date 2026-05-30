@@ -462,6 +462,9 @@ export default {
         fileName = `${generateRandomId()}${ext ? `.${ext}` : ''}`;
       }
 
+      // 同名文件已存在时自动改名（report.pdf -> report-1.pdf -> report-2.pdf ...），避免覆盖已有文件
+      fileName = await findAvailableKey(env, fileName);
+
       // 使用流式上传 - 直接传递 request.body 到 R2
       // 这样不会将整个文件加载到 Worker 内存中
       const customMetadata = {
@@ -702,6 +705,30 @@ function sanitizeFileName(name) {
   const base = name.split('/').pop().split('\\').pop();
   // 把一个或多个连续空白替换成单个 -
   return base.replace(/\s+/g, '-');
+}
+
+// 若文件名已被占用，自动在扩展名前追加 -1、-2 …… 直到找到未使用的名字，避免覆盖已有文件。
+// 例如 report.pdf 已存在时，新文件会保存为 report-1.pdf（再有冲突则 report-2.pdf）。
+async function findAvailableKey(env, fileName) {
+  if (!env || !env.R2_BUCKET || !fileName) return fileName;
+
+  // 名字未被占用，直接使用
+  if (!(await env.R2_BUCKET.head(fileName))) return fileName;
+
+  // 拆分主体与扩展名（开头的点如 .env 不算扩展名）
+  const dot = fileName.lastIndexOf('.');
+  const hasExt = dot > 0;
+  const base = hasExt ? fileName.slice(0, dot) : fileName;
+  const ext = hasExt ? fileName.slice(dot) : '';
+
+  // 依次尝试 base-1.ext、base-2.ext ……
+  for (let i = 1; i <= 1000; i++) {
+    const candidate = `${base}-${i}${ext}`;
+    if (!(await env.R2_BUCKET.head(candidate))) return candidate;
+  }
+
+  // 极端情况兜底：追加随机后缀
+  return `${base}-${generateRandomId()}${ext}`;
 }
 
 // 生成随机 ID
